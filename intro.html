@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#121212">
+<title>Guess the Intro</title>
+<link rel="stylesheet" href="common.css">
+<style>
+.hud{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;font-size:13px;color:var(--mute)}
+.hud b{color:var(--ink);font:400 26px var(--hd);letter-spacing:.04em}
+.timer{height:10px;border-radius:99px;background:var(--line);overflow:hidden;margin:6px 0 16px}
+.timer i{display:block;height:100%;width:100%;background:var(--acc);transform-origin:left;transition:background .2s}
+.timer.low i{background:#ffb020}
+.player{display:flex;align-items:center;gap:14px;margin-bottom:16px}
+.eq{display:inline-flex;gap:4px;align-items:flex-end;height:34px}
+.eq i{width:6px;background:var(--acc);border-radius:2px;height:8px}
+.eq.on i{animation:eq 1s ease-in-out infinite}
+.eq.on i:nth-child(2){animation-delay:.2s}.eq.on i:nth-child(3){animation-delay:.4s}.eq.on i:nth-child(4){animation-delay:.1s}.eq.on i:nth-child(5){animation-delay:.3s}
+@keyframes eq{0%,100%{height:6px}50%{height:32px}}
+.opts{display:grid;grid-template-columns:1fr;gap:10px}
+@media (min-width:560px){.opts{grid-template-columns:1fr 1fr}}
+.opt{font:600 16px -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;font-family:inherit;text-align:left;background:var(--bg);color:var(--ink);border:1.5px solid var(--line);border-radius:12px;padding:14px 16px;cursor:pointer;min-height:56px;touch-action:manipulation}
+.opt small{display:block;color:var(--mute);font-weight:400;font-size:12px;margin-top:2px}
+.opt:hover:not(:disabled){border-color:var(--acc)}
+.opt:disabled{cursor:default}
+.opt.right{border-color:var(--ok);background:rgba(61,190,122,.14)}
+.opt.wrong{border-color:var(--bad);background:rgba(255,107,119,.12)}
+.big{font:400 64px/1 var(--hd);letter-spacing:.03em;color:var(--acct);text-shadow:var(--glow)}
+.rl{list-style:none;margin:10px 0 0;padding:0}
+.rl li{display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px dashed var(--line);font-size:15px}
+.rl .y{color:var(--ok);font-weight:700}.rl .n{color:var(--bad);font-weight:700}
+[hidden]{display:none!important}
+</style></head><body><div class="wrap">
+<a class="back" href="./">← Games</a>
+<h1>Guess the Intro</h1>
+<p class="sub">3 seconds of audio. 4 choices. 10 seconds. The faster you answer, the more you score.</p>
+
+<div id="start" class="card">
+  <p style="margin-top:0">5 rounds. Each round plays a short clip from the start of a song. You can replay it twice. A correct answer scores up to 1000 points, and the points shrink as the timer runs down.</p>
+  <div class="row"><button class="btn" id="go" type="button">Start game</button><span class="mute" id="poolinfo"></span></div>
+  <p class="msg bad" id="startErr" hidden></p>
+  <p class="mute" id="bestline"></p>
+  <h2>Leaderboard</h2><div id="board0"></div>
+</div>
+
+<div id="play" class="card" hidden>
+  <div class="hud"><span>Round <b id="rn">1</b> / <b id="rt">5</b></span><span>Score <b id="sc">0</b></span></div>
+  <div class="timer" id="tbar"><i id="tfill"></i></div>
+  <div class="player">
+    <button class="btn alt" id="replay" type="button">Replay (2 left)</button>
+    <span class="eq" id="eq"><i></i><i></i><i></i><i></i><i></i></span>
+    <span class="mute" id="tleft">10.0s</span>
+  </div>
+  <div class="opts" id="opts"></div>
+  <p class="msg" id="fb" aria-live="polite"></p>
+  <button class="btn" id="next" type="button" hidden>Next round</button>
+</div>
+
+<div id="end" class="card" hidden>
+  <div class="mute" style="text-transform:uppercase;letter-spacing:.1em;font-weight:700">Final score</div>
+  <div class="big" id="final">0</div>
+  <p class="mute" id="summary"></p>
+  <ul class="rl" id="rlist"></ul>
+  <div class="row" style="margin-top:16px"><button class="btn" id="again" type="button">Play again</button><button class="btn alt" id="submit" type="button">Submit to leaderboard</button></div>
+  <p class="msg" id="submsg" aria-live="polite"></p>
+  <h2>Leaderboard</h2><div id="board1"></div>
+</div>
+</div>
+<script src="common.js"></script>
+<script src="songs.js"></script>
+<script>
+(function(){
+var ROUNDS=5,CLIP=3,LIMIT=10,MAXREPLAY=2,GAME='intro';
+var POOL=(window.SONG_POOL||[]).filter(function(s){return s&&s.title});
+var $=function(id){return document.getElementById(id)};
+function shuffle(a){a=a.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1)),t=a[i];a[i]=a[j];a[j]=t}return a}
+function key(s){return (s.title+'|'+(s.artist||'')).toLowerCase()}
+function playable(){return POOL.filter(function(s){return s.src})}
+var rounds=[],ri=0,score=0,locked=false,replays=0,tStart=0,raf=0,au=null,stopT=0,results=[],submitted=false;
+
+function info(){var p=playable().length,total=POOL.length;$('poolinfo').textContent=p+' playable of '+total+' songs in the pool';$('bestline').textContent=G.best(GAME)?'Your best on this device: '+G.best(GAME).toLocaleString():''}
+info();G.board($('board0'),GAME);
+
+/* Pick 5 random playable songs; each gets 3 random wrong titles from the whole pool. */
+function buildRounds(){
+  var picks=shuffle(playable()).slice(0,ROUNDS);
+  return picks.map(function(song){
+    var seen={};seen[song.title.toLowerCase()]=1;var wrong=[];
+    shuffle(POOL).forEach(function(s){var k=s.title.toLowerCase();if(wrong.length<3&&!seen[k]){seen[k]=1;wrong.push(s)}});
+    return {song:song,options:shuffle([song].concat(wrong))};
+  });
+}
+
+function newAudio(song){var a=new Audio();a.preload='auto';a.src=song.src;return a}
+function stopAudio(){clearTimeout(stopT);if(au){try{au.pause()}catch(e){}}$('eq').classList.remove('on')}
+function playClip(){
+  var r=rounds[ri];if(!r)return Promise.resolve();stopAudio();
+  au=r.audio||(r.audio=newAudio(r.song));var start=r.song.start||0;
+  try{au.currentTime=start}catch(e){}
+  var done=function(){stopAudio()};
+  $('eq').classList.add('on');
+  var pr=au.play();
+  stopT=setTimeout(done,CLIP*1000+120);
+  return pr&&pr.then?pr.catch(function(){stopAudio();$('fb').textContent='Tap Replay to hear the clip.';$('fb').className='msg'}):Promise.resolve();
+}
+
+function startGame(){
+  $('startErr').hidden=true;var p=playable();
+  if(p.length<1){$('startErr').textContent='No playable songs yet. Add audio clips to games/audio/intro/ and list them in games/songs.js.';$('startErr').hidden=false;return}
+  if(POOL.length<4){$('startErr').textContent='The pool needs at least 4 songs for the answer buttons.';$('startErr').hidden=false;return}
+  rounds=buildRounds();rounds.forEach(function(r){r.audio=newAudio(r.song)});ri=0;score=0;results=[];submitted=false;
+  $('start').hidden=true;$('end').hidden=true;$('play').hidden=false;$('rt').textContent=rounds.length;$('sc').textContent='0';
+  startRound();
+}
+function startRound(){
+  var r=rounds[ri];locked=false;replays=0;$('rn').textContent=ri+1;$('fb').textContent='';$('fb').className='msg';$('next').hidden=true;
+  $('replay').disabled=false;$('replay').textContent='Replay ('+MAXREPLAY+' left)';
+  var box=$('opts');box.innerHTML='';
+  r.options.forEach(function(o,i){var b=document.createElement('button');b.type='button';b.className='opt';b.innerHTML='<span></span><small></small>';b.firstChild.textContent=o.title;b.lastChild.textContent=o.artist||'';b.addEventListener('click',function(){answer(i)});box.appendChild(b)});
+  tStart=performance.now();tick();playClip();
+}
+function remaining(){return Math.max(0,LIMIT-(performance.now()-tStart)/1000)}
+function tick(){
+  cancelAnimationFrame(raf);
+  (function loop(){var rem=remaining();$('tfill').style.transform='scaleX('+(rem/LIMIT)+')';$('tbar').classList.toggle('low',rem<=3);$('tleft').textContent=rem.toFixed(1)+'s';
+    if(rem<=0&&!locked){answer(-1);return}if(!locked)raf=requestAnimationFrame(loop)})();
+}
+function answer(i){
+  if(locked)return;locked=true;cancelAnimationFrame(raf);stopAudio();
+  var r=rounds[ri],rem=remaining(),ok=i>=0&&key(r.options[i])===key(r.song),pts=ok?100+Math.round(900*rem/LIMIT):0;
+  score+=pts;$('sc').textContent=score.toLocaleString();
+  [].forEach.call($('opts').children,function(b,k){b.disabled=true;if(key(r.options[k])===key(r.song))b.classList.add('right');else if(k===i)b.classList.add('wrong')});
+  $('fb').className='msg '+(ok?'ok':'bad');
+  $('fb').textContent=ok?'Correct! +'+pts:(i<0?'Time is up. It was "'+r.song.title+'".':'Not quite. It was "'+r.song.title+'".');
+  $('replay').disabled=true;results.push({title:r.song.title,ok:ok,pts:pts});
+  $('next').hidden=false;$('next').textContent=ri+1>=rounds.length?'See results':'Next round';$('next').focus();
+}
+$('replay').addEventListener('click',function(){if(locked||replays>=MAXREPLAY)return;replays++;var left=MAXREPLAY-replays;$('replay').textContent='Replay ('+left+' left)';if(left<=0)$('replay').disabled=true;playClip()});
+$('next').addEventListener('click',function(){ri++;if(ri>=rounds.length)finish();else startRound()});
+function finish(){
+  stopAudio();$('play').hidden=true;$('end').hidden=false;$('final').textContent=score.toLocaleString();
+  var good=results.filter(function(x){return x.ok}).length;$('summary').textContent=good+' of '+results.length+' correct';
+  $('rlist').innerHTML=results.map(function(x){return '<li><span>'+G.esc(x.title)+'</span><span class="'+(x.ok?'y':'n')+'">'+(x.ok?'+'+x.pts:'0')+'</span></li>'}).join('');
+  G.saveBest(GAME,score);$('submsg').textContent='';$('submsg').className='msg';
+  var b=$('submit');b.disabled=false;b.textContent='Submit to leaderboard';
+  if(!G.loggedIn()){$('submsg').textContent='Log in on the band site to submit your score.';b.disabled=true}
+  G.board($('board1'),GAME);info();
+}
+$('submit').addEventListener('click',function(){
+  if(submitted)return;var b=this;b.disabled=true;
+  G.submit(GAME,score,{correct:results.filter(function(x){return x.ok}).length}).then(function(){submitted=true;$('submsg').className='msg ok';$('submsg').textContent='Score submitted.';G.board($('board1'),GAME)}).catch(function(e){b.disabled=false;$('submsg').className='msg bad';$('submsg').textContent=e.message})
+});
+$('go').addEventListener('click',startGame);$('again').addEventListener('click',startGame);
+})();
+</script></body></html>
